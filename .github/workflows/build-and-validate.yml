@@ -1,6 +1,9 @@
 name: Build AMI and Validate (Packer + Ansible - HTTP Validation)
 
 on:
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -88,7 +91,8 @@ jobs:
           AMI_ID: ${{ needs.build-ami.outputs.ami_id }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          ansible-playbook ansible/validate_ami.yml                     --extra-vars "ami_id=${AMI_ID} run_id=${RUN_ID} aws_region=${{ secrets.AWS_REGION || 'us-east-1' }}"
+          ansible-playbook ansible/validate_ami.yml \
+            --extra-vars "ami_id=${AMI_ID} run_id=${RUN_ID} aws_region=${{ secrets.AWS_REGION || 'us-east-1' }}"
 
       - name: Upload validation artifact
         if: always()
