@@ -18,7 +18,7 @@ variable "aws_region" {
 
 variable "source_ami" {
   type    = string
-  default = "ami-0c94855ba95c71c99" # Amazon Linux 2 x86_64 (replace for your region if needed)
+  default = "ami-0f918f7e67a3323f0" 
 }
 
 variable "instance_type" {
