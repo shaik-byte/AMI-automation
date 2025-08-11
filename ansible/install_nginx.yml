@@ -1,0 +1,29 @@
+- name: Install nginx in AMI build
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install minimal packages (Amazon Linux 2)
+      yum:
+        name:
+          - yum-utils
+        state: latest
+      when: ansible_os_family == 'RedHat' or ansible_distribution == 'Amazon'
+
+    - name: Install nginx
+      yum:
+        name: nginx
+        state: present
+      when: ansible_os_family == 'RedHat' or ansible_distribution == 'Amazon'
+
+    - name: Enable and start nginx
+      systemd:
+        name: nginx
+        enabled: yes
+        state: started
+
+    - name: Basic in-image HTTP check (looped)
+      command: curl -I --max-time 5 http://localhost
+      register: curl_local
+      retries: 5
+      delay: 2
+      until: curl_local.rc == 0

@@ -1,0 +1,93 @@
+---
+- name: Validate AMI by launching a temporary EC2 and hitting HTTP
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    # these are passed via --extra-vars from the workflow
+    aws_region: "{{ aws_region | default(lookup('env','AWS_REGION') | default('us-east-1')) }}"
+    ami_id: "{{ ami_id }}"
+    run_id: "{{ run_id }}"
+    instance_type: t3.micro
+    test_sg_name: "ami-validate-sg-{{ run_id }}"
+    key_name: ""  # optional - not required for HTTP validation
+
+  tasks:
+    - name: Debug start
+      debug:
+        msg: "Validating AMI {{ ami_id }} in {{ aws_region }} (run_id={{ run_id }})"
+
+    - name: Create temporary security group for HTTP (port 80)
+      amazon.aws.ec2_group:
+        name: "{{ test_sg_name }}"
+        description: "Temporary SG for AMI validation (port 80)"
+        region: "{{ aws_region }}"
+        vpc_id: "{{ lookup('env','VALIDATION_VPC_ID') | default(omit) }}"
+        rules:
+          - proto: tcp
+            ports: 80
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: -1
+            cidr_ip: 0.0.0.0/0
+        tags:
+          Purpose: "AMIValidation"
+          RunID: "{{ run_id }}"
+      register: sg
+
+    - name: Launch temporary EC2 instance from AMI
+      amazon.aws.ec2_instance:
+        region: "{{ aws_region }}"
+        image_id: "{{ ami_id }}"
+        instance_type: "{{ instance_type }}"
+        key_name: "{{ key_name if key_name != '' else omit }}"
+        security_groups: "{{ [sg.group_name] }}"
+        wait: yes
+        wait_timeout: 600
+        tags:
+          Name: "ami-validate-{{ run_id }}"
+          Purpose: "AMIValidation"
+          RunID: "{{ run_id }}"
+      register: ec2
+
+    - name: Set facts for instance details
+      set_fact:
+        test_instance_id: "{{ ec2.instance_ids[0] }}"
+        test_public_ip: "{{ ec2.instances[0].public_ip_address | default('') }}"
+
+    - name: Wait until HTTP returns 200 (retry)
+      uri:
+        url: "http://{{ test_public_ip }}"
+        status_code: 200
+        return_content: no
+        timeout: 5
+      register: http_check
+      retries: 20
+      delay: 6
+      until: http_check.status == 200
+
+    - name: Write validation artifact
+      copy:
+        content: |
+          AMI: {{ ami_id }}
+          Instance: {{ test_instance_id }}
+          PublicIP: {{ test_public_ip }}
+          HTTPStatus: {{ http_check.status }}
+        dest: "ami-validate-{{ run_id }}.txt"
+
+    - block:
+        - name: Terminate test instance
+          amazon.aws.ec2_instance:
+            region: "{{ aws_region }}"
+            instance_ids: "{{ test_instance_id }}"
+            state: absent
+            wait: yes
+            wait_timeout: 600
+
+        - name: Delete temporary security group
+          amazon.aws.ec2_group:
+            name: "{{ test_sg_name }}"
+            region: "{{ aws_region }}"
+            state: absent
+      always: true
